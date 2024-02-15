@@ -1,17 +1,23 @@
 ---
 AWSTemplateFormatVersion: "2010-09-09"
 
-Description:  This template makes your newly provisioned AWS account a sandbox account. It creates an AWS Budget with a montly limit and a SandboxDeveloper role. A VPC with 2 public subnets, 2 private subnets, an Internet Gateway, and a NAT Gateway is created to host the 2 Lambda functions. A KMS key is created for encrypting SNS traffic, logs, and Lambda functions. See comments within this template for a full listing of resources created. **WARNING** This template creates a VPC with a NAT Gateway, a KMS Key, Lambda functions, and related resources. You will be billed for the AWS resources used if you create a stack from this template.
+Description: This template creates a sandbox user which loses editing permissions when a monthly AWS budget is reached. Optionally, reaching the budget kills all resources to avoid increasing the bill. It creates a Budget, SandboxDeveloper role, VPC with public and private subnets, Internet and NAT Gateways, KMS key for encryption, and Lambda functions. **WARNING** You will be billed for the AWS resources created from this template.
 
 Metadata:
   #Organize how the parameters appear in the AWS console
   AWS::CloudFormation::Interface:
     ParameterGroups:
+      - Label: 
+          default: 'User settings'
+        Parameters:
+          - SandboxUserName
+          - FirstTimeUserPassword
       - Label:
           default: 'Budget settings'
         Parameters:
           - Currency
           - BudgetLimit
+          - KillAllResources
           - StartTime
           - ThresholdForWarning1
           - ThresholdForWarning2
@@ -20,7 +26,6 @@ Metadata:
           default: 'IAM roles and policies'
         Parameters:
           - KMSAdminRoleName
-          - SandboxRoleName
           - LambdaRoleName
       - Label:
           default: 'Lambda function names'
@@ -54,6 +59,17 @@ Parameters:
     Description: Monthly budget limit
     Type: Number
     Default: 100
+  KillAllResources:
+    Description: Set to true to kill all resources when the budget is exceeded
+    Type: String
+    AllowedValues:
+      - "true"
+      - "false"
+    Default: "false"
+  FirstTimeUserPassword:
+    Description: The first-time password for the sandbox developer user. This password is required to be changed upon first login
+    Type: String
+    NoEcho: true
   StartTime:
     Description: The date the budget starts
     Type: Number
@@ -76,7 +92,7 @@ Parameters:
     Description: Name for the KMS administrator role
     Type: String
     Default: KMSAdmin
-  SandboxRoleName:
+  SandboxUserName:
     Description: Name for the sandbox developer role
     Type: String
     Default: SandboxDeveloper
@@ -499,29 +515,23 @@ Resources:
                     ArnLike:
                         'aws:SourceArn': !Sub 'arn:${AWS::Partition}:budgets::${AWS::AccountId}:*'
               
-#Create the SandboxDeveloperRole for users to assume
-  SandboxDeveloperRole:
-    Type: AWS::IAM::Role
+#Create the SandboxDeveloperUser
+  SandboxDeveloperUser: 
+    Type: 'AWS::IAM::User'
     Properties:
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              AWS:
-                - !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:root
-            Action:
-              - 'sts:AssumeRole'
-      RoleName: !Sub ${SandboxRoleName}
-      ManagedPolicyArns:  #Start at providing PowerUserAccess
-        - !Sub arn:${AWS::Partition}:iam::aws:policy/PowerUserAccess
+      UserName: !Sub SandboxUserName
+      LoginProfile:
+        Password: !Ref FirstTimeUserPassword   
+        PasswordResetRequired: true
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/PowerUserAccess' #Attach managed policy to user
         
 #Create SandboxPowerUserRestrictions IAM policy
   SandboxPowerUserRestrictionsPolicy:
     Type: AWS::IAM::ManagedPolicy
     Properties:
       ManagedPolicyName: !Sub SandboxPowerUserRestrictions-${AWS::Region} #Add Region to policy name to avoid issues when deploying stack to multiple AWS Regions
-      PolicyDocument:  #Remove permissions from PowerUserAccess that you do not want, including the ability to modify Budgets and the Lambda functions that govern SandboxDeveloper access
+      PolicyDocument: #Remove permissions from PowerUserAccess that you do not want, including the ability to modify Budgets and the Lambda functions that govern SandboxDeveloper access
         Version: "2012-10-17"
         Statement:
             - Sid: RestrictBudgetsAccess
@@ -540,8 +550,8 @@ Resources:
               Resource: 
                 - !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${LockdownSandboxFunctionName}'
                 - !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${RestoreSandboxFunctionName}'
-      Roles:
-        - !Ref SandboxDeveloperRole
+      Users:
+        - !Ref SandboxDeveloperUser
 
   #create SNS topic for budget warning notification
   SNSBudgetWarning:
@@ -681,9 +691,9 @@ Resources:
             Statement:
               - Effect: Allow
                 Action:
-                  - 'iam:DetachRolePolicy'
-                  - 'iam:AttachRolePolicy'
-                Resource: !GetAtt SandboxDeveloperRole.Arn
+                  - 'iam:DetachUserPolicy'
+                  - 'iam:AttachUserPolicy'
+                Resource: !GetAtt SandboxDeveloperUser.Arn
               - Effect: Allow
                 Action:
                   - 'ec2:CreateNetworkInterface'
@@ -729,28 +739,28 @@ Resources:
                 #Create IAM client
                 iam = boto3.client('iam')
                 
-                #Detach PowerUserAccess policy from SandboxDeveloper role
-                iam.detach_role_policy(
+                #Detach PowerUserAccess policy from SandboxDeveloper user
+                iam.detach_user_policy(
+                UserName=!Sub ${SandboxUserName}
                 PolicyArn='arn:${AWS::Partition}:iam::aws:policy/PowerUserAccess',
-                RoleName='SandboxDeveloper'
                 )
                 
-                #Detach SandboxPowerUserRestrictions policy from SandboxDeveloper role
-                iam.detach_role_policy(
+                #Detach SandboxPowerUserRestrictions policy from SandboxDeveloper user
+                iam.detach_user_policy(
+                UserName=!Sub ${SandboxUserName}
                 PolicyArn='arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/SandboxPowerUserRestrictions-${AWS::Region}',
-                RoleName='SandboxDeveloper'
                 )
 
-                #Attach ReadOnlyAccess SandboxDeveloper role
-                iam.attach_role_policy(
+                #Attach ReadOnlyAccess SandboxDeveloper user
+                iam.attach_user_policy(
+                UserName=!Sub ${SandboxUserName}
                 PolicyArn='arn:${AWS::Partition}:iam::aws:policy/ReadOnlyAccess',
-                RoleName='SandboxDeveloper'
                 )
                 
                 #Return success message, if there is an error that will be automatically returned
                 return {
                     'statusCode': 200,
-                    'body': json.dumps('SandboxDeveloper role set to read only')
+                    'body': json.dumps('SandboxDeveloper user access set to read only')
                 }
 
   #Give the SNS topic permissions to invoke the lambda
@@ -788,27 +798,27 @@ Resources:
                 iam = boto3.client('iam')
                 
                 #Detach the Sandbox role lockdown policy from SandboxDeveloper role
-                iam.detach_role_policy(
+                iam.detach_user_policy(
+                UserName=!Sub {SandboxUserName}
                 PolicyArn='arn:${AWS::Partition}:iam::aws:policy/ReadOnlyAccess',
-                RoleName='SandboxDeveloper'
                 )
 
                 #Attach PowerUserAccess policy to SandboxDeveloper role
                 iam.attach_role_policy(
+                UserName=!Sub {SandboxUserName}
                 PolicyArn='arn:${AWS::Partition}:iam::aws:policy/PowerUserAccess',
-                RoleName='SandboxDeveloper'
                 )
                 
                 #Attach SandboxPowerUserRestrictions policy to SandboxDeveloper role
                 iam.attach_role_policy(
+                UserName=!Sub {SandboxUserName}
                 PolicyArn='arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/SandboxPowerUserRestrictions-${AWS::Region}',
-                RoleName='SandboxDeveloper'
                 )
                 
                 #Return success message, if there is an error that will be automatically returned
                 return {
                     'statusCode': 200,
-                    'body': json.dumps('SandboxDeveloper role access restored')
+                    'body': json.dumps('SandboxDeveloper user access restored')
                 }
 
 
