@@ -1,7 +1,7 @@
 ---
-AWSTemplateFormatVersion: "2010-09-09"
+AWSTemplateFormatVersion: 2010-09-09
 
-Description: This template creates a sandbox user which loses editing permissions when a monthly AWS budget is reached. Optionally, reaching the budget kills all resources to avoid increasing the bill. It creates a Budget, SandboxDeveloper role, VPC with public and private subnets, Internet and NAT Gateways, KMS key for encryption, and Lambda functions. **WARNING** You will be billed for the AWS resources created from this template.
+Description: This template creates a sandbox user which loses editing permissions when a monthly AWS budget is reached. Optionally, reaching the budget kills all resources to avoid increasing the bill. It creates a Budget, SandboxDeveloper role, and Lambda functions. **WARNING** You will be billed for the AWS resources created from this template.
 
 Metadata:
   #Organize how the parameters appear in the AWS console
@@ -25,7 +25,6 @@ Metadata:
       - Label:
           default: 'IAM roles and policies'
         Parameters:
-          - KMSAdminRoleName
           - LambdaRoleName
       - Label:
           default: 'Lambda function names'
@@ -37,17 +36,6 @@ Metadata:
         Parameters:
           - SNSBudgetWarningTopicName
           - SNSBudgetExceededTopicName
-      - Label:
-          default: 'VPC settings'
-        Parameters:
-          - VpcName
-          - VpcCIDR
-          - PublicSubnet1CIDR
-          - PublicSubnet2CIDR
-          - PrivateSubnet1CIDR
-          - PrivateSubnet2CIDR
-          - InternetEgressCIDR
-          - VpcLogGroupName
 
 Parameters:
   #Budget settings
@@ -88,10 +76,6 @@ Parameters:
     Default: 100
 
   #IAM roles and policies
-  KMSAdminRoleName:
-    Description: Name for the KMS administrator role
-    Type: String
-    Default: KMSAdmin
   SandboxUserName:
     Description: Name for the sandbox developer role
     Type: String
@@ -121,400 +105,7 @@ Parameters:
     Type: String
     Default: SandboxBudgetExceeded
 
-  #VPC information
-  VpcName:
-    Description: An VPC environment name that is prefixed to resource names
-    Type: String
-    Default: SandboxVPC
-  VpcCIDR:
-    Description: Please enter the IP range (CIDR notation) for this VPC
-    Type: String
-    Default: 10.192.0.0/20
-  PublicSubnet1CIDR:
-    Description: Please enter the IP range (CIDR notation) for the public subnet in the first Availability Zone
-    Type: String
-    Default: 10.192.0.0/24
-  PublicSubnet2CIDR:
-    Description: Please enter the IP range (CIDR notation) for the public subnet in the second Availability Zone
-    Type: String
-    Default: 10.192.1.0/24
-  PrivateSubnet1CIDR:
-    Description: Please enter the IP range (CIDR notation) for the private subnet in the first Availability Zone
-    Type: String
-    Default: 10.192.8.0/24
-  PrivateSubnet2CIDR:
-    Description: Please enter the IP range (CIDR notation) for the private subnet in the second Availability Zone
-    Type: String
-    Default: 10.192.9.0/24
-  InternetEgressCIDR:
-    Description: Please enter the IP range (CIDR notation) for the internet egress of your security group
-    Type: String
-    Default: 0.0.0.0/0
-  VpcLogGroupName:
-    Description: The CloudWatch log group name where your VPC Flow Logs will be written
-    Type: String
-    Default: SandboxVPCFlowLogs
-
 Resources:
-  #Create a VPC and subnets for your Lambda functions and other resources
-  VPC:
-    Type: AWS::EC2::VPC
-    Properties:
-      CidrBlock: !Ref VpcCIDR
-      EnableDnsSupport: true
-      EnableDnsHostnames: true
-      Tags:
-        - Key: Name
-          Value: !Ref VpcName
-
-  #Public subnets
-  PublicSubnet1:
-    Type: AWS::EC2::Subnet
-    Properties:
-      VpcId: !Ref VPC
-      AvailabilityZone: !Select [ 0, !GetAZs  '' ]
-      CidrBlock: !Ref PublicSubnet1CIDR
-      MapPublicIpOnLaunch: true
-      Tags:
-        - Key: Name
-          Value: !Sub ${VpcName} Public Subnet (AZ1)
-  PublicSubnet2:
-    Type: AWS::EC2::Subnet
-    Properties:
-      VpcId: !Ref VPC
-      AvailabilityZone: !Select [ 0, !GetAZs  '' ]
-      CidrBlock: !Ref PublicSubnet2CIDR
-      MapPublicIpOnLaunch: true
-      Tags:
-        - Key: Name
-          Value: !Sub ${VpcName} Public Subnet (AZ2)
-
-  #Private subnets
-  PrivateSubnet1:
-    Type: AWS::EC2::Subnet
-    Properties:
-      VpcId: !Ref VPC
-      AvailabilityZone: !Select [ 0, !GetAZs  '' ]
-      CidrBlock: !Ref PrivateSubnet1CIDR
-      MapPublicIpOnLaunch: false
-      Tags:
-        - Key: Name
-          Value: !Sub ${VpcName} Private Subnet (AZ1)
-  PrivateSubnet2:
-    Type: AWS::EC2::Subnet
-    Properties:
-      VpcId: !Ref VPC
-      AvailabilityZone: !Select [ 1, !GetAZs  '' ]
-      CidrBlock: !Ref PrivateSubnet2CIDR
-      MapPublicIpOnLaunch: false
-      Tags:
-        - Key: Name
-          Value: !Sub ${VpcName} Private Subnet (AZ2)
-
-  #Internet gateway
-  InternetGateway:
-    Type: AWS::EC2::InternetGateway
-  VPCInternetGateway:
-    Type: AWS::EC2::VPCGatewayAttachment
-    Properties:
-      VpcId: !Ref VPC
-      InternetGatewayId: !Ref InternetGateway
-  PublicRouteTable:
-    Type: AWS::EC2::RouteTable
-    Properties:
-      VpcId: !Ref VPC
-  PublicRoute:
-    Type: AWS::EC2::Route
-    Properties:
-      RouteTableId: !Ref PublicRouteTable
-      DestinationCidrBlock: !Ref InternetEgressCIDR
-      GatewayId: !Ref InternetGateway
-  PublicSubnet1RouteTableAssociation:
-    Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties:
-      SubnetId: !Ref PublicSubnet1
-      RouteTableId: !Ref PublicRouteTable
-  PublicSubnet2RouteTableAssociation:
-    Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties:
-      SubnetId: !Ref PublicSubnet2
-      RouteTableId: !Ref PublicRouteTable
-
-  #NAT gateway
-  NATGateway:
-    Type: AWS::EC2::NatGateway
-    Properties:
-      AllocationId: !GetAtt NATGatewayEIP.AllocationId
-      SubnetId: !Ref PublicSubnet1
-      Tags:
-      - Key: Name
-        Value: !Sub ${VpcName} NAT Gateway (AZ1)
-  NATGatewayEIP:
-    Type: AWS::EC2::EIP
-    DependsOn: VPC
-    Properties:
-      Domain: vpc
-  PrivateRouteTable:
-    Type: AWS::EC2::RouteTable
-    Properties:
-        VpcId: !Ref VPC
-  PrivateRoute:
-    Type: AWS::EC2::Route
-    Properties:
-      NatGatewayId: !Ref NATGateway
-      RouteTableId: !Ref PrivateRouteTable
-      DestinationCidrBlock: !Ref InternetEgressCIDR
-  PrivateSubnet1RouteTableAssociation:
-    Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties:
-      SubnetId: !Ref PrivateSubnet1
-      RouteTableId: !Ref PrivateRouteTable
-  PrivateSubnet2RouteTableAssociation:
-    Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties:
-      SubnetId: !Ref PrivateSubnet2
-      RouteTableId: !Ref PrivateRouteTable
-
-  #Security group
-  NoIngressSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupName: 'no-ingress-sg'
-      GroupDescription: 'Security group with egress only'
-      SecurityGroupEgress:
-        - IpProtocol: tcp
-          FromPort: 80
-          ToPort: 80
-          Description: Egress only HTTP
-          CidrIp: !Ref InternetEgressCIDR
-        - IpProtocol: tcp
-          FromPort: 443
-          ToPort: 443
-          Description: Egress only HTTPS
-          CidrIp: !Ref InternetEgressCIDR
-      VpcId: !Ref VPC
-
-  #VPC flow logs
-  VPCFlowLogRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-        - Effect: Allow
-          Principal:
-            Service: vpc-flow-logs.amazonaws.com
-          Action: 'sts:AssumeRole'
-  VPCLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName: !Sub ${VpcLogGroupName}
-      RetentionInDays: 7
-      KmsKeyId: !GetAtt KMSKey.Arn
-  VPCFlowLog:
-    Type: AWS::EC2::FlowLog
-    Properties:
-        DeliverLogsPermissionArn: !GetAtt VPCFlowLogRole.Arn
-        ResourceId: !Ref VPC
-        ResourceType: VPC
-        LogDestination: !GetAtt VPCLogGroup.Arn
-        TrafficType: ALL
-  VPCFlowLogPermissions:
-    Type: AWS::IAM::Policy
-    Properties:
-        Roles:
-          - !Ref VPCFlowLogRole
-        PolicyName: VPCFlowLogToCW
-        PolicyDocument:
-          Version: '2012-10-17'
-          Statement:
-            - Effect: Allow
-              Action:
-                - 'logs:CreateLogStream'
-                - 'logs:PutLogEvents'
-                - 'logs:DescribeLogGroups'
-                - 'logs:DescribeLogStreams'
-              Resource: !GetAtt VPCLogGroup.Arn
-
- #Create a KMS primary key for encrypting your Lambda functions, SNS topics, and other resources
- 
-  KMSAdminRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              AWS:
-                - !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:root
-            Action:
-              - 'sts:AssumeRole'
-      RoleName: !Sub ${KMSAdminRoleName}
-  
-  KMSKey:
-    Type: AWS::KMS::Key
-    Properties:
-        Description: A multi-Region primary key
-        MultiRegion: true
-        EnableKeyRotation: true
-        PendingWindowInDays: 10
-        KeyPolicy:
-            Version: 2012-10-17
-            Id: sandbox-primary-key
-            Statement:
-                - Sid: EnableIAMRolePermissions
-                  Effect: Allow
-                  Principal:
-                    AWS: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:root
-                  Action: 'kms:*'
-                  Resource: '*'
-                - Sid: Allow administration of the key
-                  Effect: Allow
-                  Principal:
-                    AWS: !GetAtt KMSAdminRole.Arn
-                  Action:
-                   - 'kms:ReplicateKey'
-                   - 'kms:Create*'
-                   - 'kms:Describe*'
-                   - 'kms:Enable*'
-                   - 'kms:List*'
-                   - 'kms:Put*'
-                   - 'kms:Update*'
-                   - 'kms:Revoke*'
-                   - 'kms:Disable*'
-                   - 'kms:Get*'
-                   - 'kms:Delete*'
-                   - 'kms:ScheduleKeyDeletion'
-                   - 'kms:CancelKeyDeletion'
-                  Resource: '*'
-                - Sid: AllowLockdownSandboxLambdaFunction
-                  Effect: Allow
-                  Principal:
-                    Service:
-                    - 'lambda.amazonaws.com'
-                  Action:
-                    - 'kms:DescribeKey'
-                    - 'kms:Encrypt'
-                    - 'kms:Decrypt'
-                    - 'kms:ReEncrypt*'
-                    - 'kms:GenerateDataKey'
-                    - 'kms:GenerateDataKeyWithoutPlaintext'
-                  Resource: '*' #Within the key policy attached to the key at creation, * means this key to which the policy is being attached
-                  Condition:
-                    StringEquals:
-                        'aws:SourceArn': !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${LockdownSandboxFunctionName}'
-                - Sid: Allow use of the key by the RestoreSandbox Lambda function
-                  Effect: Allow
-                  Principal:
-                    Service:
-                    - 'lambda.amazonaws.com'
-                  Action:
-                    - 'kms:DescribeKey'
-                    - 'kms:Encrypt'
-                    - 'kms:Decrypt'
-                    - 'kms:ReEncrypt*'
-                    - 'kms:GenerateDataKey'
-                    - 'kms:GenerateDataKeyWithoutPlaintext'
-                  Resource: '*' #Within the key policy attached to the key at creation, * means this key to which the policy is being attached
-                  Condition:
-                    StringEquals:
-                        'aws:SourceArn': !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${RestoreSandboxFunctionName}'
-                - Sid: AllowLockdownSandboxLogGroup
-                  Effect: Allow
-                  Principal:
-                    Service:
-                    - 'logs.amazonaws.com'
-                  Action:
-                    - 'kms:DescribeKey'
-                    - 'kms:Encrypt'
-                    - 'kms:Decrypt'
-                    - 'kms:ReEncrypt*'
-                    - 'kms:GenerateDataKey'
-                    - 'kms:GenerateDataKeyWithoutPlaintext'
-                  Resource: '*' #Within the key policy attached to the key at creation, * means this key to which the policy is being attached
-                  Condition:
-                    StringEquals:
-                        'aws:SourceArn': !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${LockdownSandboxFunctionName}'
-                - Sid: AllowRestoreSandboxLogGroup
-                  Effect: Allow
-                  Principal:
-                    Service:
-                    - 'logs.amazonaws.com'
-                  Action:
-                    - 'kms:DescribeKey'
-                    - 'kms:Encrypt'
-                    - 'kms:Decrypt'
-                    - 'kms:ReEncrypt*'
-                    - 'kms:GenerateDataKey'
-                    - 'kms:GenerateDataKeyWithoutPlaintext'
-                  Resource: '*' #Within the key policy attached to the key at creation, * means this key to which the policy is being attached
-                  Condition:
-                    StringEquals:
-                        'aws:SourceArn': !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${RestoreSandboxFunctionName}'
-                - Sid: AllowVPCFlowLog
-                  Effect: Allow
-                  Principal:
-                    Service:
-                    - 'logs.amazonaws.com'
-                  Action:
-                    - 'kms:DescribeKey'
-                    - 'kms:Encrypt'
-                    - 'kms:Decrypt'
-                    - 'kms:ReEncrypt*'
-                    - 'kms:GenerateDataKey'
-                    - 'kms:GenerateDataKeyWithoutPlaintext'
-                  Resource: '*' #Within the key policy attached to the key at creation, * means this key to which the policy is being attached
-                  Condition:
-                    StringEquals:
-                        'aws:SourceArn': !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${VpcLogGroupName}'
-                - Sid: AllowBudgetWarningSNS
-                  Effect: Allow
-                  Principal:
-                    Service:
-                    - 'sns.amazonaws.com'
-                  Action:
-                    - 'kms:DescribeKey'
-                    - 'kms:Encrypt'
-                    - 'kms:Decrypt'
-                    - 'kms:ReEncrypt*'
-                    - 'kms:GenerateDataKey'
-                    - 'kms:GenerateDataKeyWithoutPlaintext'
-                  Resource: '*' #Within the key policy attached to the key at creation, * means this key to which the policy is being attached
-                  Condition:
-                    StringEquals:
-                        'aws:SourceArn': !Sub 'arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:${SNSBudgetWarningTopicName}'
-                - Sid: AllowBudgetExceededSNS
-                  Effect: Allow
-                  Principal:
-                    Service:
-                    - 'sns.amazonaws.com'
-                  Action:
-                    - 'kms:DescribeKey'
-                    - 'kms:Encrypt'
-                    - 'kms:Decrypt'
-                    - 'kms:ReEncrypt*'
-                    - 'kms:GenerateDataKey'
-                    - 'kms:GenerateDataKeyWithoutPlaintext'
-                  Resource: '*' #Within the key policy attached to the key at creation, * means this key to which the policy is being attached
-                  Condition:
-                    StringEquals:
-                        'aws:SourceArn' : !Sub 'arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:${SNSBudgetExceededTopicName}'
-                - Sid: AllowAWSBudgets
-                  Effect: Allow
-                  Principal:
-                    Service:
-                    - 'budgets.amazonaws.com'
-                  Action:
-                    - 'kms:Decrypt'
-                    - 'kms:GenerateDataKey*'
-                  Resource: '*' #Within the key policy attached to the key at creation, * means this key to which the policy is being attached
-                  Condition:
-                    StringEquals:
-                        'aws:SourceAccount' : !Sub ${AWS::AccountId}
-                    ArnLike:
-                        'aws:SourceArn': !Sub 'arn:${AWS::Partition}:budgets::${AWS::AccountId}:*'
-              
 #Create the SandboxDeveloperUser
   SandboxDeveloperUser: 
     Type: 'AWS::IAM::User'
@@ -559,7 +150,6 @@ Resources:
     Properties:
      TopicName: !Sub ${SNSBudgetWarningTopicName}
      DisplayName: !Sub ${SNSBudgetWarningTopicName}
-     KmsMasterKeyId: !Ref KMSKey
 
   #create SNS topic policy for budget warning notification
   SNSBudgetWarningPolicy:
@@ -589,11 +179,158 @@ Resources:
     Properties:
      TopicName: !Sub ${SNSBudgetExceededTopicName}
      DisplayName: !Sub ${SNSBudgetExceededTopicName}
-     KmsMasterKeyId: !Ref KMSKey
      Subscription:
       - Endpoint:
           !GetAtt LockdownSandboxLambda.Arn
         Protocol: lambda
+
+  SNSTarget:
+    Type: AWS::SNS::TopicSubscription
+    Properties: 
+      TopicArn: !Ref SNSBudgetExceeded
+      Protocol: lambda
+      Endpoint: !GetAtt NukeStepFunction.Arn
+
+  NukeStepFunction:
+    Type: 'AWS::StepFunctions::StateMachine'
+    Properties:
+      StateMachineName: nuke-account-cleanser-codebuild-state-machine
+      RoleArn: !GetAtt 'NukeStepFunctionRole.Arn'
+      DefinitionSubstitutions: 
+      InputPayload: 
+        nuke_dry_run: "${AWSNukeDryRunFlag}"
+        nuke_version: "${AWSNukeVersion}" 
+        region_list: 
+          - us-east-1
+          - us-west-1
+      DefinitionString:
+        Fn::Sub: |-
+          {
+            "Comment": "AWS Nuke Account Cleanser for multi-region single account clean up using SFN Map state parallel invocation of CodeBuild project.",
+            "StartAt": "StartNukeCodeBuildForEachRegion",
+            "States": {
+              "StartNukeCodeBuildForEachRegion": {
+                "Type": "Map",
+                "ItemsPath": "$.InputPayLoad.region_list",
+                "Parameters": {
+                  "region_id.$": "$$.Map.Item.Value",
+                  "nuke_dry_run.$": "$.InputPayLoad.nuke_dry_run",
+                  "nuke_version.$": "$.InputPayLoad.nuke_version"
+                },
+                "Next": "Clean Output and Notify",
+                "MaxConcurrency": 0,
+                "Iterator": {
+                  "StartAt": "Trigger Nuke CodeBuild Job",
+                  "States": {
+                    "Trigger Nuke CodeBuild Job": {
+                      "Type": "Task",
+                      "Resource": "arn:aws:states:::codebuild:startBuild.sync",
+                      "Parameters": {
+                        "ProjectName": "${NukeCodeBuildProject.Arn}",
+                        "EnvironmentVariablesOverride": [
+                          {
+                            "Name": "NukeTargetRegion",
+                            "Type": "PLAINTEXT",
+                            "Value.$": "$.region_id"
+                          },
+                          {
+                            "Name": "AWS_NukeDryRun",
+                            "Type": "PLAINTEXT",
+                            "Value.$": "$.nuke_dry_run"
+                          },
+                          {
+                            "Name": "AWS_NukeVersion",
+                            "Type": "PLAINTEXT",
+                            "Value.$": "$.nuke_version"
+                          }
+                        ]
+                      },
+                      "Next": "Check Nuke CodeBuild Job Status",
+                      "ResultSelector": {
+                        "NukeBuildOutput.$": "$.Build"
+                      },
+                      "ResultPath": "$.AccountCleanserRegionOutput",
+                      "Retry": [
+                        {
+                          "ErrorEquals": [
+                            "States.TaskFailed"
+                          ],
+                          "BackoffRate": 1,
+                          "IntervalSeconds": 1,
+                          "MaxAttempts": 1
+                        }
+                      ],
+                      "Catch": [
+                        {
+                          "ErrorEquals": [
+                            "States.ALL"
+                          ],
+                          "Next": "Nuke Failed",
+                          "ResultPath": "$.AccountCleanserRegionOutput"
+                        }
+                      ]
+                    },
+                    "Check Nuke CodeBuild Job Status": {
+                      "Type": "Choice",
+                      "Choices": [
+                        {
+                          "Variable": "$.AccountCleanserRegionOutput.NukeBuildOutput.BuildStatus",
+                          "StringEquals": "SUCCEEDED",
+                          "Next": "Nuke Success"
+                        },
+                        {
+                          "Variable": "$.AccountCleanserRegionOutput.NukeBuildOutput.BuildStatus",
+                          "StringEquals": "FAILED",
+                          "Next": "Nuke Failed"
+                        }
+                      ],
+                      "Default": "Nuke Success"
+                    },
+                    "Nuke Success": {
+                      "Type": "Pass",
+                      "Parameters": {
+                        "Status": "Succeeded",
+                        "Region.$": "$.region_id",
+                        "CodeBuild Status.$": "$.AccountCleanserRegionOutput.NukeBuildOutput.BuildStatus"
+                      },
+                      "ResultPath": "$.result",
+                      "End": true
+                    },
+                    "Nuke Failed": {
+                      "Type": "Pass",
+                      "Parameters": {
+                        "Status": "Failed",
+                        "Region.$": "$.region_id",
+                        "CodeBuild Status.$": "States.Format('Nuke Account Cleanser failed with error {}. Check CodeBuild execution for input region {} to investigate', $.AccountCleanserRegionOutput.Error, $.region_id)"
+                      },
+                      "ResultPath": "$.result",
+                      "End": true
+                    }
+                  }
+                },
+                "ResultSelector": {
+                  "filteredResult.$": "$..result"
+                },
+                "ResultPath": "$.NukeFinalMapAllRegionsOutput"
+              },
+              "Clean Output and Notify": {
+                "Type": "Task",
+                "Resource": "arn:aws:states:::sns:publish",
+                "Parameters": {
+                  "Subject": "State Machine for Nuke Account Cleanser completed",
+                  "Message.$": "States.Format('Nuke Account Cleanser completed for input payload: \n {}. \n ----------------------------------------- \n Check the summmary of execution below: \n {}', $.InputPayLoad, $.NukeFinalMapAllRegionsOutput.filteredResult)",
+                  "TopicArn": "${NukeEmailTopic}"
+                },
+                "End": true
+              }
+            }
+          }
+      Tags:
+        - Key: DoNotNuke
+          Value: 'True'
+        - Key: owner
+          Value: !Ref Owner
+
 
   #policy for the budget exceeded SNS topic
   SNSBudgetExceededPolicy:
@@ -661,14 +398,12 @@ Resources:
     Properties:
         LogGroupName: !Sub '/aws/lambda/${LockdownSandboxFunctionName}'
         RetentionInDays: 7
-        KmsKeyId: !GetAtt KMSKey.Arn
-   
+  
   RestoreSandboxLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
         LogGroupName: !Sub '/aws/lambda/${RestoreSandboxFunctionName}'
         RetentionInDays: 7
-        KmsKeyId: !GetAtt KMSKey.Arn
 
   #Create role for the sandbox lambdas to run as
   LambdaRole:
@@ -722,13 +457,6 @@ Resources:
       Runtime: python3.9
       Role: !GetAtt LambdaRole.Arn
       Handler: index.lambda_handler
-      KmsKeyArn: !GetAtt KMSKey.Arn
-      VpcConfig:
-        SecurityGroupIds:
-            - !Sub ${NoIngressSecurityGroup}
-        SubnetIds:
-            - !Sub ${PrivateSubnet1}
-            - !Sub ${PrivateSubnet2}
       Code:
         ZipFile: !Sub |
           import json
@@ -780,13 +508,6 @@ Resources:
       Runtime: python3.9
       Role: !GetAtt LambdaRole.Arn
       Handler: index.lambda_handler
-      KmsKeyArn: !GetAtt KMSKey.Arn
-      VpcConfig:
-        SecurityGroupIds:
-            - !Sub ${NoIngressSecurityGroup}
-        SubnetIds:
-            - !Sub ${PrivateSubnet1}
-            - !Sub ${PrivateSubnet2}
       Code:
         ZipFile: !Sub |
           import json
