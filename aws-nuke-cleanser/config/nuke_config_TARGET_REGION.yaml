@@ -1,0 +1,144 @@
+account-blocklist:
+- 123456789012
+accounts:
+  '590184093698':
+    filters:
+      CloudTrailTrail:
+      - type: regex
+        value: .*
+      - property: tag:DoNotNuke
+        value: 'True'
+      - property: tag:Permanent
+        value: 'True'
+      - type: regex
+        value: .*auto-account-cleanser*.*
+      - type: regex
+        value: .*nuke-account-cleanser*.*
+      - type: regex
+        value: .*securityhub*.*
+      - type: regex
+        value: .*aws-prod*.*
+      IAMRole:
+      - ProdRoles
+      - DoNotDeleteRoles
+      - type: regex
+        value: .*
+      - AWSReservedSSO_AWSAdministratorAccess_6a5fd71758a00e3c
+      - AWSReservedSSO_AWSPowerUserAccess_889d8cf477352b37
+      - AWSReservedSSO_AWSReadOnlyAccess_eb1283723d7b3eae
+      - AWSReservedSSO_AWSServiceCatalogAdminFullAccess_c72788771644886c
+      - AWSReservedSSO_AWSServiceCatalogEndUserAccess_14c8cd043fa1cc15
+      - property: tag:DoNotNuke
+        value: 'True'
+      - property: tag:Permanent
+        value: 'True'
+      - type: regex
+        value: .*auto-account-cleanser*.*
+      - type: regex
+        value: .*nuke-account-cleanser*.*
+      - type: regex
+        value: .*securityhub*.*
+      - type: regex
+        value: .*aws-prod*.*
+      IAMUser:
+      - admin
+      - type: regex
+        value: .*
+      - property: tag:DoNotNuke
+        value: 'True'
+      - property: tag:Permanent
+        value: 'True'
+      - type: regex
+        value: .*auto-account-cleanser*.*
+      - type: regex
+        value: .*nuke-account-cleanser*.*
+      - type: regex
+        value: .*securityhub*.*
+      - type: regex
+        value: .*aws-prod*.*
+      IAMUserAccessKey:
+      - property: UserName
+        value: admin
+      - property: tag:DoNotNuke
+        value: 'True'
+      - property: tag:Permanent
+        value: 'True'
+      - type: regex
+        value: .*auto-account-cleanser*.*
+      - type: regex
+        value: .*nuke-account-cleanser*.*
+      - type: regex
+        value: .*securityhub*.*
+      - type: regex
+        value: .*aws-prod*.*
+      IAMUserPolicyAttachment:
+      - property: RoleName
+        value: admin
+      - property: tag:DoNotNuke
+        value: 'True'
+      - property: tag:Permanent
+        value: 'True'
+      - type: regex
+        value: .*auto-account-cleanser*.*
+      - type: regex
+        value: .*nuke-account-cleanser*.*
+      - type: regex
+        value: .*securityhub*.*
+      - type: regex
+        value: .*aws-prod*.*
+      S3Bucket:
+      - s3://my-bucket
+      - property: tag:DoNotNuke
+        value: 'True'
+      - property: tag:Permanent
+        value: 'True'
+      - type: regex
+        value: .*auto-account-cleanser*.*
+      - type: regex
+        value: .*nuke-account-cleanser*.*
+      - type: regex
+        value: .*securityhub*.*
+      - type: regex
+        value: .*aws-prod*.*
+      SNSTopic:
+      - type: regex
+        value: .*
+      - property: tag:DoNotNuke
+        value: 'True'
+      - property: tag:Permanent
+        value: 'True'
+      - type: regex
+        value: .*auto-account-cleanser*.*
+      - type: regex
+        value: .*nuke-account-cleanser*.*
+      - type: regex
+        value: .*securityhub*.*
+      - type: regex
+        value: .*aws-prod*.*
+      SQSQueue:
+      - property: tag:DoNotNuke
+        value: 'True'
+      - property: tag:Permanent
+        value: 'True'
+      - type: regex
+        value: .*auto-account-cleanser*.*
+      - type: regex
+        value: .*nuke-account-cleanser*.*
+      - type: regex
+        value: .*securityhub*.*
+      - type: regex
+        value: .*aws-prod*.*
+regions:
+- TARGET_REGION
+resource-types:
+  excludes:
+  - S3Object
+  - DynamoDBTableItem
+  targets:
+  - IAMUser
+  - IAMUserPolicyAttachment
+  - IAMUserAccessKey
+  - S3Bucket
+  - SNSTopic
+  - SQSQueue
+  - CloudTrailTrail

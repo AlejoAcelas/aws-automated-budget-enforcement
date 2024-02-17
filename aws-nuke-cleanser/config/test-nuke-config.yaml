@@ -1,0 +1,23 @@
+regions:
+- us-east-1
+- global
+
+account-blocklist:
+- "999999999999" # production
+
+resource-types:
+  targets:
+  - S3Object
+  - S3Bucket
+  - IAMUser
+
+accounts:
+  "730335211514":
+    filters:
+      IAMUser:
+      - "admin"
+      S3Bucket:
+      - property: CreationDate
+        type: dateOlderThan
+        value: 1h
+        invert: true
