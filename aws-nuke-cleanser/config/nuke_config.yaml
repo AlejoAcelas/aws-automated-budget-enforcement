@@ -1,5 +1,5 @@
 account-blocklist:
-- 123456789012
+- 99999999999
 accounts:
   '590184093698':
     filters:
@@ -18,16 +18,11 @@ accounts:
         value: .*securityhub*.*
       - type: regex
         value: .*aws-prod*.*
-      IAMRole:
-      - ProdRoles
-      - DoNotDeleteRoles
-      - type: regex
-        value: .*
-      - AWSReservedSSO_AWSAdministratorAccess_6a5fd71758a00e3c
-      - AWSReservedSSO_AWSPowerUserAccess_889d8cf477352b37
-      - AWSReservedSSO_AWSReadOnlyAccess_eb1283723d7b3eae
-      - AWSReservedSSO_AWSServiceCatalogAdminFullAccess_c72788771644886c
-      - AWSReservedSSO_AWSServiceCatalogEndUserAccess_14c8cd043fa1cc15
+      - invert: 'true'
+        property: CreationDate
+        type: dateOlderThan
+        value: 24h
+      EC2:
       - property: tag:DoNotNuke
         value: 'True'
       - property: tag:Permanent
@@ -40,6 +35,21 @@ accounts:
         value: .*securityhub*.*
       - type: regex
         value: .*aws-prod*.*
+      - invert: 'true'
+        property: CreationDate
+        type: dateOlderThan
+        value: 24h
+      IAMRole:
+      - AWSReservedSSO_AWSAdministratorAccess_6a5fd71758a00e3c
+      - AWSReservedSSO_AWSPowerUserAccess_889d8cf477352b37
+      - AWSReservedSSO_AWSReadOnlyAccess_eb1283723d7b3eae
+      - AWSReservedSSO_AWSServiceCatalogAdminFullAccess_c72788771644886c
+      - AWSReservedSSO_AWSServiceCatalogEndUserAccess_14c8cd043fa1cc15
+      - AWSReservedSSO_AWSAdministratorAccess_6a5fd71758a00e3c
+      - AWSReservedSSO_AWSPowerUserAccess_889d8cf477352b37
+      - AWSReservedSSO_AWSReadOnlyAccess_eb1283723d7b3eae
+      - AWSReservedSSO_AWSServiceCatalogAdminFullAccess_c72788771644886c
+      - AWSReservedSSO_AWSServiceCatalogEndUserAccess_14c8cd043fa1cc15
       IAMUser:
       - admin
       - type: regex
@@ -56,6 +66,10 @@ accounts:
         value: .*securityhub*.*
       - type: regex
         value: .*aws-prod*.*
+      - invert: 'true'
+        property: CreationDate
+        type: dateOlderThan
+        value: 24h
       IAMUserAccessKey:
       - property: UserName
         value: admin
@@ -71,6 +85,10 @@ accounts:
         value: .*securityhub*.*
       - type: regex
         value: .*aws-prod*.*
+      - invert: 'true'
+        property: CreationDate
+        type: dateOlderThan
+        value: 24h
       IAMUserPolicyAttachment:
       - property: RoleName
         value: admin
@@ -86,6 +104,10 @@ accounts:
         value: .*securityhub*.*
       - type: regex
         value: .*aws-prod*.*
+      - invert: 'true'
+        property: CreationDate
+        type: dateOlderThan
+        value: 24h
       S3Bucket:
       - s3://my-bucket
       - property: tag:DoNotNuke
@@ -100,6 +122,10 @@ accounts:
         value: .*securityhub*.*
       - type: regex
         value: .*aws-prod*.*
+      - invert: 'true'
+        property: CreationDate
+        type: dateOlderThan
+        value: 24h
       SNSTopic:
       - type: regex
         value: .*
@@ -115,6 +141,10 @@ accounts:
         value: .*securityhub*.*
       - type: regex
         value: .*aws-prod*.*
+      - invert: 'true'
+        property: CreationDate
+        type: dateOlderThan
+        value: 24h
       SQSQueue:
       - property: tag:DoNotNuke
         value: 'True'
@@ -128,8 +158,13 @@ accounts:
         value: .*securityhub*.*
       - type: regex
         value: .*aws-prod*.*
+      - invert: 'true'
+        property: CreationDate
+        type: dateOlderThan
+        value: 24h
 regions:
-- TARGET_REGION
+- us-east-1
+- global
 resource-types:
   excludes:
   - S3Object
@@ -142,3 +177,4 @@ resource-types:
   - SNSTopic
   - SQSQueue
   - CloudTrailTrail
+  - EC2

@@ -37,6 +37,9 @@ Parameters:
     Type: String
     Default: OpsAdmin
     Description: The Owner of the account to be used for tagging purpose
+  NotificationEmail:
+    Type: String
+    Default:
 
 Resources:
   NukeAccountCleanserPolicy:
@@ -298,21 +301,19 @@ Resources:
                 - echo " ------------------------------------------------ " >> error_log.txt
                 - echo "Getting nuke generic config file from S3";
                 - aws s3 cp s3://$NukeS3Bucket/nuke_generic_config.yaml .
-                - echo "Updating the TARGET_REGION in the generic config from the parameter"
-                - sed -i "s/TARGET_REGION/$NukeTargetRegion/g" nuke_generic_config.yaml
                 - echo "Getting filter/exclusion python script from S3";
                 - aws s3 cp s3://$NukeS3Bucket/nuke_config_update.py .
                 - echo "Getting 12-digit ID of this account"
                 - account_id=$(aws sts get-caller-identity |jq -r ".Account");
                 - echo "Running Config filter/update script";
-                - python3 nuke_config_update.py --account $account_id --region "$NukeTargetRegion";
+                - python3 nuke_config_update.py --account $account_id";
                 - echo "Configured nuke_config.yaml";
                 - echo "Running Nuke on Account";
                 - |
                   if [ "$AWS_NukeDryRun" = "true" ]; then
-                    for file in $(ls nuke_config_$NukeTargetRegion*) ; do aws-nuke -c $file --force --profile nuke 2>&1 |tee -a aws-nuke.log; done
+                    aws-nuke -c nuke_config.py --force --profile nuke 2>&1 |tee -a aws-nuke.log; done
                   elif [ "$AWS_NukeDryRun" = "false" ]; then
-                    for file in $(ls nuke_config_$NukeTargetRegion*) ; do aws-nuke -c $file --force --no-dry-run --profile nuke 2>&1 |tee -a aws-nuke.log; done
+                    aws-nuke -c nuke_config.py --force --no-dry-run --profile nuke 2>&1 |tee -a aws-nuke.log; done
                   else
                     echo "Couldn't determine Dryrun flag...exiting"
                     exit 1
@@ -345,7 +346,6 @@ Resources:
                           echo "  ----------------------------------------------------------------"
                           echo "  DryRunMode                   : $AWS_NukeDryRun"
                           echo "  Account ID                   : $account_id"
-                          echo "  Target Region                : $NukeTargetRegion"
                           echo "  Build State                  : $([ "${CODEBUILD_BUILD_SUCCEEDING}" = "1" ] && echo "JOB SUCCEEDED" || echo "JOB FAILED")"
                           echo "  Build ID                     : ${CODEBUILD_BUILD_ID}"
                           echo "  CodeBuild Project Name       : $NukeCodeBuildProjectName"
@@ -360,7 +360,7 @@ Resources:
                   if [ "$CODEBUILD_BUILD_SUCCEEDING" = "0" ]; then 
                     echo " Couldn't process Nuke Cleanser - Exiting " >> fail_email_template.txt
                     cat error_log.txt >> fail_email_template.txt
-                    aws sns publish --topic-arn $Publish_TopicArn --message file://fail_email_template.txt --subject "Nuke Account Cleanser Failed in account $account_id and region $NukeTargetRegion"
+                    aws sns publish --topic-arn $Publish_TopicArn --message file://fail_email_template.txt --subject "Nuke Account Cleanser Failed in account $account_id"
                     exit 1;
                   fi
                 - sleep 120
@@ -385,7 +385,7 @@ Resources:
                     echo "The file log_output.txt does not exist."
                   fi
                 - echo "Publishing Log Ouput to SNS:"
-                - sub="Nuke Account Cleanser Succeeded in account "$account_id" and region "$NukeTargetRegion""
+                - sub="Nuke Account Cleanser Succeeded in account "$account_id""
                 - |
                   {
                           echo "  Account Cleansing Process Completed;"
@@ -396,7 +396,6 @@ Resources:
                           echo "  ------------------------------------------------------------------"
                           echo "  DryRunMode                   : $AWS_NukeDryRun"
                           echo "  Account ID                   : $account_id"
-                          echo "  Target Region                : $NukeTargetRegion"
                           echo "  Build State                  : $([ "${CODEBUILD_BUILD_SUCCEEDING}" = "1" ] && echo "JOB SUCCEEDED" || echo "JOB FAILED")"
                           echo "  Build ID                     : ${CODEBUILD_BUILD_ID}"
                           echo "  CodeBuild Project Name       : $NukeCodeBuildProjectName"
@@ -443,7 +442,7 @@ Resources:
     Properties:
       Name: !Sub EventBridgeNukeSchedule-${AWS::StackName}
       Description: Scheduled Event for running AWS Nuke on the target accounts within the specified regions
-      ScheduleExpression: cron(0 7 ? * * *)
+      ScheduleExpression: cron(0 7 1 1 ? *)
       State:  ENABLED
       RoleArn: !GetAtt EventBridgeNukeScheduleRole.Arn
       # Update the tags for this manually as the property is not available for all targets
@@ -464,10 +463,6 @@ Resources:
               "InputPayLoad": {
                 "nuke_dry_run": "${AWSNukeDryRunFlag}",
                 "nuke_version": "${AWSNukeVersion}",
-                "region_list": [
-                  "us-west-1",
-                  "us-east-1"
-                ]
               }
             }
 
@@ -528,7 +523,7 @@ Resources:
       FifoTopic: false
       KmsMasterKeyId: "alias/aws/sns"
       Subscription:
-       - Endpoint: "test@test.com" # Provide your valid email address for receiving notifications
+       - Endpoint: !Ref NotificationEmail
          Protocol: "email"
       TopicName: !Ref NukeTopicName
       Tags:
@@ -599,7 +594,7 @@ Resources:
                 Resource:
                   - !Sub "arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:nuke-account-cleanser-codebuild-state-machine"
 
-  NukeStepFunction:
+    NukeStepFunction:
     Type: 'AWS::StepFunctions::StateMachine'
     Properties:
       StateMachineName: nuke-account-cleanser-codebuild-state-machine
@@ -608,130 +603,74 @@ Resources:
         Fn::Sub: |-
           {
             "Comment": "AWS Nuke Account Cleanser for multi-region single account clean up using SFN Map state parallel invocation of CodeBuild project.",
-            "StartAt": "StartNukeCodeBuildForEachRegion",
+            "StartAt": "StartNukeCodeBuild",
             "States": {
-              "StartNukeCodeBuildForEachRegion": {
-                "Type": "Map",
-                "ItemsPath": "$.InputPayLoad.region_list",
+              "Trigger Nuke CodeBuild Job": {
+                "Type": "Task",
+                "Resource": "arn:aws:states:::codebuild:startBuild.sync",
                 "Parameters": {
-                  "region_id.$": "$$.Map.Item.Value",
-                  "nuke_dry_run.$": "$.InputPayLoad.nuke_dry_run",
-                  "nuke_version.$": "$.InputPayLoad.nuke_version"
-                },
-                "Next": "Clean Output and Notify",
-                "MaxConcurrency": 0,
-                "Iterator": {
-                  "StartAt": "Trigger Nuke CodeBuild Job",
-                  "States": {
-                    "Trigger Nuke CodeBuild Job": {
-                      "Type": "Task",
-                      "Resource": "arn:aws:states:::codebuild:startBuild.sync",
-                      "Parameters": {
-                        "ProjectName": "${NukeCodeBuildProject.Arn}",
-                        "EnvironmentVariablesOverride": [
-                          {
-                            "Name": "NukeTargetRegion",
-                            "Type": "PLAINTEXT",
-                            "Value.$": "$.region_id"
-                          },
-                          {
-                            "Name": "AWS_NukeDryRun",
-                            "Type": "PLAINTEXT",
-                            "Value.$": "$.nuke_dry_run"
-                          },
-                          {
-                            "Name": "AWS_NukeVersion",
-                            "Type": "PLAINTEXT",
-                            "Value.$": "$.nuke_version"
-                          }
-                        ]
-                      },
-                      "Next": "Check Nuke CodeBuild Job Status",
-                      "ResultSelector": {
-                        "NukeBuildOutput.$": "$.Build"
-                      },
-                      "ResultPath": "$.AccountCleanserRegionOutput",
-                      "Retry": [
-                        {
-                          "ErrorEquals": [
-                            "States.TaskFailed"
-                          ],
-                          "BackoffRate": 1,
-                          "IntervalSeconds": 1,
-                          "MaxAttempts": 1
-                        }
-                      ],
-                      "Catch": [
-                        {
-                          "ErrorEquals": [
-                            "States.ALL"
-                          ],
-                          "Next": "Nuke Failed",
-                          "ResultPath": "$.AccountCleanserRegionOutput"
-                        }
-                      ]
+                  "ProjectName": "${NukeCodeBuildProject.Arn}",
+                  "EnvironmentVariablesOverride": [
+                    {
+                      "Name": "AWS_NukeDryRun",
+                      "Type": "PLAINTEXT",
+                      "Value.$": "$.InputPayLoad.nuke_dry_run"
                     },
-                    "Check Nuke CodeBuild Job Status": {
-                      "Type": "Choice",
-                      "Choices": [
-                        {
-                          "Variable": "$.AccountCleanserRegionOutput.NukeBuildOutput.BuildStatus",
-                          "StringEquals": "SUCCEEDED",
-                          "Next": "Nuke Success"
-                        },
-                        {
-                          "Variable": "$.AccountCleanserRegionOutput.NukeBuildOutput.BuildStatus",
-                          "StringEquals": "FAILED",
-                          "Next": "Nuke Failed"
-                        }
-                      ],
-                      "Default": "Nuke Success"
-                    },
-                    "Nuke Success": {
-                      "Type": "Pass",
-                      "Parameters": {
-                        "Status": "Succeeded",
-                        "Region.$": "$.region_id",
-                        "CodeBuild Status.$": "$.AccountCleanserRegionOutput.NukeBuildOutput.BuildStatus"
-                      },
-                      "ResultPath": "$.result",
-                      "End": true
-                    },
-                    "Nuke Failed": {
-                      "Type": "Pass",
-                      "Parameters": {
-                        "Status": "Failed",
-                        "Region.$": "$.region_id",
-                        "CodeBuild Status.$": "States.Format('Nuke Account Cleanser failed with error {}. Check CodeBuild execution for input region {} to investigate', $.AccountCleanserRegionOutput.Error, $.region_id)"
-                      },
-                      "ResultPath": "$.result",
-                      "End": true
+                    {
+                      "Name": "AWS_NukeVersion",
+                      "Type": "PLAINTEXT",
+                      "Value.$": "$.InputPayLoad.nuke_version"
                     }
-                  }
+                  ]
                 },
+                "Next": "Notify Build Status",
                 "ResultSelector": {
-                  "filteredResult.$": "$..result"
+                  "NukeBuildOutput.$": "$.Build"
                 },
-                "ResultPath": "$.NukeFinalMapAllRegionsOutput"
+                "ResultPath": "$.AccountCleanserOutput",
+                "Retry": [
+                  {
+                    "ErrorEquals": [
+                      "States.TaskFailed"
+                    ],
+                    "BackoffRate": 1,
+                    "IntervalSeconds": 1,
+                    "MaxAttempts": 1
+                  }
+                ],
+                "Catch": [
+                  {
+                    "ErrorEquals": [
+                      "States.ALL"
+                    ],
+                    "Next": "Nuke Failed",
+                    "ResultPath": "$.AccountCleanserOutput"
+                  }
+                ]
               },
-              "Clean Output and Notify": {
+              "Notify Build Status": {
                 "Type": "Task",
                 "Resource": "arn:aws:states:::sns:publish",
                 "Parameters": {
                   "Subject": "State Machine for Nuke Account Cleanser completed",
-                  "Message.$": "States.Format('Nuke Account Cleanser completed for input payload: \n {}. \n ----------------------------------------- \n Check the summmary of execution below: \n {}', $.InputPayLoad, $.NukeFinalMapAllRegionsOutput.filteredResult)",
+                  "Message.$": "States.Format('Nuke Account Cleanser completed for input payload: \n {}. \n ----------------------------------------- \n Check the summmary of execution below: \n {}', $.InputPayLoad, $.AccountCleanserOutput.NukeBuildOutput.BuildStatus)",
                   "TopicArn": "${NukeEmailTopic}"
                 },
+                "ResultSelector": {
+                  "BuildStatus.$": "$.AccountCleanserOutput.NukeBuildOutput.BuildStatus"
+                },
+                "ResultPath": "$.NukeFinalOutput",
                 "End": true
               }
             }
           }
+
       Tags:
         - Key: DoNotNuke
           Value: 'True'
         - Key: owner
           Value: !Ref Owner
-
+  
 Outputs:
   NukeTopicArn:
     Description: Arn of SNS Topic used for notifying nuke results in email

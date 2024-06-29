@@ -1,11 +1,10 @@
 regions:
-  # add `global` here to include IAM entities to be nuked
-  - TARGET_REGION # will be overridden during run time based on region parameter
+  - us-east-1
+  - 'global'
 
-account-blocklist:
-- 123456789012 #prod
-
-# optional: restrict nuking to these resources
+account-blocklist: 
+  - 99999999999 # optional: restrict nuking to these accounts
+  
 resource-types:
   excludes: # exclude this as will be already handled when you include S3Bucket/DynamoDBTable. Else takes a lot of time and logs get filled up
   - S3Object
@@ -22,11 +21,6 @@ resource-types:
 accounts:
   ACCOUNT: # will be overridden during run time based on account param
     filters:
-      IAMRole:
-      - "ProdRoles"
-      - "DoNotDeleteRoles"
-      - type: regex
-        value: ".*"
       IAMUser:
       - "admin"
       - type: regex
@@ -37,12 +31,6 @@ accounts:
       IAMUserAccessKey:
       - property: UserName
         value: "admin"
-      S3Bucket:
-      - "s3://my-bucket"
-      CloudTrailTrail: # filter all CloudTrail
-      - type: regex
-        value: ".*"
-      SNSTopic: # SNS is protected based on global exception tags inside the nuke_config_update.py
-      - type: regex
-        value: ".*"
-      SQSQueue: [] # delete all SQS
+      # CloudTrailTrail: # filter all CloudTrail
+      # - type: regex
+      #   value: ".*"
